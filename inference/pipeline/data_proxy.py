@@ -21,6 +21,7 @@ import torch
 from einops import rearrange
 from inference.common import DataProxyConfig, Modality, VarlenHandler
 from inference.model.dit.dit_module import FFAHandler
+from inference.utils.device import get_device
 from torch.nn import functional as F
 from unfoldNd import UnfoldNd
 
@@ -55,8 +56,9 @@ def calc_local_qk_range(num_video_tokens, num_audio_and_txt_tokens, num_frames, 
     at_q_ranges = torch.tensor([[num_video_tokens, total_tokens]])
     at_k_ranges = torch.tensor([[0, total_tokens]])
 
-    q_ranges = torch.cat([local_q_range, video_q_range, at_q_ranges], dim=0).to(torch.int32).to("cuda", non_blocking=True)
-    k_ranges = torch.cat([local_k_range, video_k_range, at_k_ranges], dim=0).to(torch.int32).to("cuda", non_blocking=True)
+    _dev = get_device()
+    q_ranges = torch.cat([local_q_range, video_q_range, at_q_ranges], dim=0).to(torch.int32).to(_dev)
+    k_ranges = torch.cat([local_k_range, video_k_range, at_k_ranges], dim=0).to(torch.int32).to(_dev)
 
     return (q_ranges, k_ranges)
 
@@ -65,7 +67,7 @@ def calc_local_attn_ffa_handler(num_video_tokens, num_audio_and_txt_tokens, num_
     q_ranges, k_ranges = calc_local_qk_range(num_video_tokens, num_audio_and_txt_tokens, num_frames, frame_receptive_field)
     max_seqlen_q = num_video_tokens + num_audio_and_txt_tokens
     max_seqlen_k = num_video_tokens + num_audio_and_txt_tokens
-    attn_type_map = torch.zeros([q_ranges.shape[0]], device="cuda", dtype=torch.int32)
+    attn_type_map = torch.zeros([q_ranges.shape[0]], device=get_device(), dtype=torch.int32)
     softmax_scale = None
 
     ffa_handler = FFAHandler(
@@ -366,11 +368,12 @@ class MagiDataProxy:
         else:
             local_attn_handler = None
 
+        _dev = get_device()
         varlen_handler = VarlenHandler(
-            cu_seqlens_q=simple_packed_data.cu_seqlen.to(torch.int32).cuda(),
-            cu_seqlens_k=simple_packed_data.cu_seqlen.to(torch.int32).cuda(),
-            max_seqlen_q=simple_packed_data.max_seqlen.to(torch.int32).cuda(),
-            max_seqlen_k=simple_packed_data.max_seqlen.to(torch.int32).cuda(),
+            cu_seqlens_q=simple_packed_data.cu_seqlen.to(torch.int32).to(_dev),
+            cu_seqlens_k=simple_packed_data.cu_seqlen.to(torch.int32).to(_dev),
+            max_seqlen_q=simple_packed_data.max_seqlen.to(torch.int32).to(_dev),
+            max_seqlen_k=simple_packed_data.max_seqlen.to(torch.int32).to(_dev),
         )
 
         self.saved_for_output(simple_packed_data=simple_packed_data)

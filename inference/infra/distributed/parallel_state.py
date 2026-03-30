@@ -73,6 +73,10 @@ def _get_nccl_options(pg_name, nccl_comm_cfgs):
 
     When an option (e.g., max_ctas) is not found in the config, use the NCCL default setting.
     """
+    # NCCL options only apply when using NCCL backend (CUDA)
+    backend = torch.distributed.get_backend() if torch.distributed.is_initialized() else "gloo"
+    if backend != "nccl":
+        return None
     if pg_name in nccl_comm_cfgs:
         nccl_options = torch.distributed.ProcessGroupNCCL.Options()
         nccl_options.config.cga_cluster_size = nccl_comm_cfgs[pg_name].get("cga_cluster_size", 4)

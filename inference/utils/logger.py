@@ -80,10 +80,12 @@ def print_rank_last(message, *args, **kwargs):
 
 def print_mem_info_rank_0(prefix: str = ""):
     "Print the allocated and reserved GPU memory on device 0."
-    allocated = torch.cuda.memory_allocated()
-    max_allocated = torch.cuda.max_memory_allocated()
-    reserved = torch.cuda.memory_reserved()
-    max_reserved = torch.cuda.max_memory_reserved()
+    from inference.utils.device import memory_stats
+    stats = memory_stats()
+    allocated = stats["allocated"]
+    max_allocated = stats["max_allocated"]
+    reserved = stats["reserved"]
+    max_reserved = stats["max_reserved"]
 
     allocated = round(allocated / 1024 / 1024 / 1024, 2)
     reserved = round(reserved / 1024 / 1024 / 1024, 2)

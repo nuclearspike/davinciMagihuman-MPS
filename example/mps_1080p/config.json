@@ -1,0 +1,22 @@
+{
+  "engine_config": {
+    "load": "/Users/techfreakworm/.cache/huggingface/hub/models--GAIR--daVinci-MagiHuman/snapshots/7fe95e50c11bd92bdadf94cd51dbec18427f8e0c/distill",
+    "distill": true,
+    "cp_size": 1,
+    "distributed_backend": "gloo"
+  },
+  "evaluation_config": {
+    "cfg_number": 1,
+    "num_inference_steps": 8,
+    "audio_model_path": "/Users/techfreakworm/.cache/huggingface/hub/models--stabilityai--stable-audio-open-1.0/snapshots/f21265c1e2710b3bd2386596943f0007f55f802e",
+    "txt_model_path": "/Users/techfreakworm/.cache/huggingface/hub/models--google--t5gemma-9b-9b-ul2/snapshots/7071a2ace9c8353e12e723e5382cc7256ee41d9f",
+    "vae_model_path": "/Users/techfreakworm/.cache/huggingface/hub/models--Wan-AI--Wan2.2-TI2V-5B/snapshots/921dbaf3f1674a56f47e83fb80a34bac8a8f203e",
+    "use_sr_model": true,
+    "sr_model_path": "/Users/techfreakworm/.cache/huggingface/hub/models--GAIR--daVinci-MagiHuman/snapshots/7fe95e50c11bd92bdadf94cd51dbec18427f8e0c/1080p_sr",
+    "sr_num_inference_steps": 5,
+    "sr_cfg_number": 1,
+    "use_turbo_vae": true,
+    "student_config_path": "/Users/techfreakworm/.cache/huggingface/hub/models--GAIR--daVinci-MagiHuman/snapshots/7fe95e50c11bd92bdadf94cd51dbec18427f8e0c/turbo_vae/TurboV3-Wan22-TinyShallow_7_7.json",
+    "student_ckpt_path": "/Users/techfreakworm/.cache/huggingface/hub/models--GAIR--daVinci-MagiHuman/snapshots/7fe95e50c11bd92bdadf94cd51dbec18427f8e0c/turbo_vae/checkpoint-340000.ckpt"
+  }
+}

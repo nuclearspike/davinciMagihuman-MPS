@@ -35,11 +35,10 @@ def _gather_metadata(tensor_list: List[torch.Tensor], group: dist.ProcessGroup) 
     dist.get_rank(group)
     world_size = dist.get_world_size(group)
 
-    local_rank = torch.distributed.get_rank() % torch.cuda.device_count()
-    assert (
-        local_rank == torch.cuda.current_device()
-    ), f"local_rank {local_rank} != current_device {torch.cuda.current_device()}"
-    device = tensor_list[0].device if len(tensor_list) > 0 else torch.device("cuda")
+    from inference.utils.device import get_device, current_device_index
+    _dev_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
+    local_rank = torch.distributed.get_rank() % _dev_count
+    device = tensor_list[0].device if len(tensor_list) > 0 else get_device()
 
     # ========== Step 1: flatten local tensor list ==========
 
@@ -119,11 +118,10 @@ def gather_arbitrary_tensor_list(tensor_list: List[torch.Tensor], group: dist.Pr
     dist.get_rank(group)
     world_size = dist.get_world_size(group)
 
-    local_rank = torch.distributed.get_rank() % torch.cuda.device_count()
-    assert (
-        local_rank == torch.cuda.current_device()
-    ), f"local_rank {local_rank} != current_device {torch.cuda.current_device()}"
-    device = tensor_list[0].device if len(tensor_list) > 0 else torch.device("cuda")
+    from inference.utils.device import get_device, current_device_index
+    _dev_count = torch.cuda.device_count() if torch.cuda.is_available() else 1
+    local_rank = torch.distributed.get_rank() % _dev_count
+    device = tensor_list[0].device if len(tensor_list) > 0 else get_device()
 
     # Step 1: Gather metadata
     metadata_lists = _gather_metadata(tensor_list, group)

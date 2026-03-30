@@ -12,17 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import torch
 
 
 def is_hopper_arch():
+    if not torch.cuda.is_available():
+        return False
     return torch.cuda.get_device_capability()[0] == 9
 
 
 def get_arch_memory(unit: str = "GB"):
-    if not torch.cuda.is_available():
+    if torch.cuda.is_available():
+        total_bytes = torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory
+    elif torch.backends.mps.is_available():
+        # Apple Silicon unified memory — use os.sysconf for total system RAM
+        total_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    else:
         return 0
-    total_bytes = torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory
     if unit == "B":
         return float(total_bytes)
     elif unit == "KB":

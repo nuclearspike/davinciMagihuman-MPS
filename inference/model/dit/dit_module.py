@@ -386,6 +386,87 @@ def create_linear(
 
 HAS_MAGI_ATTENTION = importlib.util.find_spec("magi_attention") is not None
 HAS_FA3 = importlib.util.find_spec("flash_attn_interface") is not None
+HAS_FA2 = importlib.util.find_spec("flash_attn") is not None
+
+
+def _sdpa_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+    """SDPA fallback for flash_attn_func. Handles layout: (B,S,H,D) -> (B,H,S,D) -> back.
+
+    Uses float32 accumulation for attention on MPS to avoid bfloat16 precision loss,
+    and native GQA support (enable_gqa=True) when KV heads differ from Q heads.
+    """
+    import torch.nn.functional as F
+    # query/key/value shape: (B, S, H, D) or (S, H, D) — flash_attn convention
+    needs_batch = query.dim() == 3
+    if needs_batch:
+        query = query.unsqueeze(0)
+        key = key.unsqueeze(0)
+        value = value.unsqueeze(0)
+    # Transpose to (B, H, S, D) for SDPA
+    q = query.transpose(1, 2)
+    k = key.transpose(1, 2)
+    v = value.transpose(1, 2)
+    # Compute attention in float32 to avoid bfloat16 precision degradation on MPS.
+    # bf16 SDPA on MPS has ~7x worse precision than fp32 (0.005 vs 0.000001 max error),
+    # and this compounds across 40+ transformer layers.
+    input_dtype = q.dtype
+    if q.dtype == torch.bfloat16:
+        q = q.float()
+        k = k.float()
+        v = v.float()
+    # Handle GQA: use native enable_gqa=True (PyTorch >= 2.5) instead of repeat_interleave
+    num_heads_q = q.shape[1]
+    num_heads_kv = k.shape[1]
+    use_gqa = num_heads_kv < num_heads_q
+    out = F.scaled_dot_product_attention(q, k, v, enable_gqa=use_gqa)
+    # Cast back to original dtype
+    out = out.to(input_dtype)
+    # Back to (B, S, H, D)
+    out = out.transpose(1, 2)
+    if needs_batch:
+        out = out.squeeze(0)
+    return out
+
+
+def _compute_lse(query: torch.Tensor, key: torch.Tensor) -> torch.Tensor:
+    """Compute log-sum-exp of attention scores for chunked attention correction.
+
+    Args:
+        query: (S_q, H_q, D) — query chunk
+        key:   (S_k, H_kv, D) — key chunk (H_kv may differ from H_q for GQA)
+
+    Returns:
+        lse: (H_q, S_q) — log-sum-exp of attention scores per head and query position
+    """
+    num_heads_q = query.shape[1]
+    num_heads_kv = key.shape[1]
+    head_dim = query.shape[2]
+    s_q = query.shape[0]
+    scale = head_dim ** -0.5
+
+    # Compute in float32 for numerical stability
+    q_f = query.float()
+    k_f = key.float()
+
+    if num_heads_kv < num_heads_q:
+        repeat_factor = num_heads_q // num_heads_kv
+        k_f = k_f.repeat_interleave(repeat_factor, dim=1)
+
+    # Estimate memory for full scores matrix: H_q * S_q * S_k * 4 bytes
+    s_k = k_f.shape[0]
+    scores_mem_bytes = num_heads_q * s_q * s_k * 4
+    # Use per-head computation if full matrix exceeds ~256 MB
+    if scores_mem_bytes > 256 * 1024 * 1024:
+        lse = torch.empty(num_heads_q, s_q, dtype=torch.float32, device=query.device)
+        for h in range(num_heads_q):
+            # (S_q, D) @ (D, S_k) -> (S_q, S_k)
+            scores_h = torch.mm(q_f[:, h, :], k_f[:, h, :].t()) * scale
+            lse[h] = torch.logsumexp(scores_h, dim=-1)
+        return lse
+    else:
+        # scores: (H_q, S_q, S_k)
+        scores = torch.einsum('shd,thd->hst', q_f, k_f) * scale
+        return torch.logsumexp(scores, dim=-1)
 
 
 @magi_register_custom_op(name="infra::flash_attn_func", is_subgraph_boundary=True)
@@ -394,10 +475,13 @@ def flash_attn_func(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor)
         from flash_attn_interface import flash_attn_func as fa3_flash_attn_func
 
         return fa3_flash_attn_func(query, key, value)
-    else:
+    elif HAS_FA2:
         from flash_attn.flash_attn_interface import flash_attn_func as fa2_flash_attn_func
 
         return fa2_flash_attn_func(query, key, value)
+    else:
+        # MPS / CPU fallback: use PyTorch SDPA
+        return _sdpa_attention(query, key, value)
 
 
 def _split_q_range_with_no_overlap(
@@ -427,20 +511,41 @@ def _flash_attn_with_correction(
     output = torch.zeros_like(query)
     output_lse = torch.zeros((query.shape[0], query.shape[1]), dtype=torch.float32, device=query.device)
 
-    from flash_attn.flash_attn_interface import flash_attn_func
+    if HAS_FA2:
+        from flash_attn.flash_attn_interface import flash_attn_func as _fa_func
+        use_fa = True
+    else:
+        use_fa = False
 
     for q_range, k_ranges in zip(q_ranges, k_range_list):
         q_start, q_end = q_range
         qo_out, qo_lse = None, None
         for k_range in k_ranges:
             k_start, k_end = k_range
-            cur_qo_out, cur_qo_lse, _ = flash_attn_func(
-                query[q_start:q_end].unsqueeze(0),
-                key[k_start:k_end].unsqueeze(0),
-                value[k_start:k_end].unsqueeze(0),
-                return_attn_probs=True,
-            )
-            cur_qo_out, cur_qo_lse = cur_qo_out.squeeze(0), cur_qo_lse.squeeze(0)
+            if use_fa:
+                cur_qo_out, cur_qo_lse, _ = _fa_func(
+                    query[q_start:q_end].unsqueeze(0),
+                    key[k_start:k_end].unsqueeze(0),
+                    value[k_start:k_end].unsqueeze(0),
+                    return_attn_probs=True,
+                )
+                cur_qo_out, cur_qo_lse = cur_qo_out.squeeze(0), cur_qo_lse.squeeze(0)
+            else:
+                # SDPA fallback — compute both attention output and LSE
+                q_chunk = query[q_start:q_end]   # (S_q, H_q, D)
+                k_chunk = key[k_start:k_end]      # (S_k, H_kv, D)
+                v_chunk = value[k_start:k_end]    # (S_k, H_kv, D)
+
+                cur_qo_out = _sdpa_attention(
+                    q_chunk.unsqueeze(0),
+                    k_chunk.unsqueeze(0),
+                    v_chunk.unsqueeze(0),
+                ).squeeze(0)
+
+                # Compute LSE properly for multi-range correction.
+                # Without correct LSE, chunks get equal weight (50/50) instead
+                # of proper softmax-weighted combination, causing severe artifacts.
+                cur_qo_lse = _compute_lse(q_chunk, k_chunk)
 
             if qo_out is None:
                 qo_out = cur_qo_out
@@ -515,7 +620,7 @@ def flash_attn_with_cp(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, cp_spl
         k = k.unsqueeze(0)
         v = v.unsqueeze(0)
 
-    self_attn_out = torch.ops.infra.flash_attn_func(q, k, v).squeeze(0)
+    self_attn_out = flash_attn_func(q, k, v).squeeze(0)
 
     if get_cp_world_size() > 1:
         self_attn_out = scatter_seqlen_gather_head(self_attn_out, cp_split_sizes, get_cp_group(), async_op=False)
@@ -546,7 +651,7 @@ def flex_flash_attn_with_cp(
     if get_cp_world_size() > 1:
         q, k, v = batch_scatter_head_gather_seqlen([q, k, v], cp_split_sizes, get_cp_group())
 
-    out, _ = torch.ops.infra.flex_flash_attn_func(q, k, v, q_ranges=q_ranges, k_ranges=k_ranges)
+    out, _ = flex_flash_attn_func(q, k, v, q_ranges=q_ranges, k_ranges=k_ranges)
 
     if get_cp_world_size() > 1:
         out = scatter_seqlen_gather_head(out, cp_split_sizes, get_cp_group(), async_op=False)

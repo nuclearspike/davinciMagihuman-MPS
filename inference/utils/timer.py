@@ -60,7 +60,8 @@ class EventPathTimer:
         and calculates the elapsed time since the last recorded message, if any.
         It then logs the elapsed time along with the previous and current messages.
         """
-        torch.cuda.synchronize()
+        from inference.utils.device import synchronize as _sync
+        _sync()
         current_time = datetime.now()
         if self.prev_message is not None:
             print_fn(

@@ -947,8 +947,11 @@ class Wan2_2_VAE:
         dim_mult=[1, 2, 4, 4],
         temperal_downsample=[False, True, True],
         dtype=torch.float,
-        device="cuda",
+        device=None,
     ):
+        if device is None:
+            from inference.utils.device import get_device_string
+            device = get_device_string()
         self.dtype = dtype
         self.device = device
 

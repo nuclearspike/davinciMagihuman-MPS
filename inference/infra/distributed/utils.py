@@ -34,14 +34,16 @@ def get_world_size():
 
 
 def get_device(local_rank=None):
-    backend = torch.distributed.get_backend()
+    from inference.utils.device import get_device as _get_dev
+    backend = torch.distributed.get_backend() if torch.distributed.is_initialized() else "gloo"
     if backend == "nccl":
         if local_rank is None:
             device = torch.device("cuda")
         else:
             device = torch.device(f"cuda:{local_rank}")
     elif backend == "gloo":
-        device = torch.device("cpu")
+        # On gloo backend, prefer MPS if available, else CPU
+        device = _get_dev()
     else:
-        raise RuntimeError
+        device = _get_dev()
     return device

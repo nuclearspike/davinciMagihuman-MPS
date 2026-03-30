@@ -27,7 +27,12 @@ def initialize_distributed():
     """Initialize torch.distributed and core model parallel."""
     config = parse_config()
 
-    device_count = torch.cuda.device_count()
+    # Determine backend: use gloo on non-CUDA systems (MPS, CPU)
+    backend = config.engine_config.distributed_backend
+    if not torch.cuda.is_available() and backend == "nccl":
+        backend = "gloo"
+
+    device_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
     if torch.distributed.is_initialized():
         if torch.distributed.get_rank() == 0:
             print_rank_0("> torch distributed already initialized, skipping initialization ...")
@@ -35,21 +40,21 @@ def initialize_distributed():
         rank = int(os.getenv("RANK", "0"))
         world_size = int(os.getenv("WORLD_SIZE", "1"))
         if rank == 0:
-            print_rank_0("> initializing torch distributed ...")
+            print_rank_0(f"> initializing torch distributed (backend={backend}) ...")
         # Manually set the device ids.
         if device_count > 0:
             device = rank % device_count
             torch.cuda.set_device(device)
         # Call the init process
         torch.distributed.init_process_group(
-            backend=config.engine_config.distributed_backend,
+            backend=backend,
             world_size=world_size,
             rank=rank,
             timeout=timedelta(minutes=config.engine_config.distributed_timeout_minutes),
         )
 
     # Set the tp, pp and dp communicators.
-    if device_count > 0:
+    if device_count > 0 or torch.backends.mps.is_available():
         if model_parallel_is_initialized():
             return
         initialize_model_parallel(

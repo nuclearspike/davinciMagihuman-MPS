@@ -24,6 +24,7 @@ from PIL import Image
 from inference.common import EvaluationConfig, parse_config
 from inference.model.dit import get_dit
 from inference.model.dit import DiTModel
+from inference.utils.device import fork_rng_devices, get_device_string
 from .video_generate import MagiEvaluator
 from .video_process import merge_video_and_audio, upsample_video
 
@@ -31,7 +32,7 @@ from .video_process import merge_video_and_audio, upsample_video
 class MagiPipeline:
     """Pipeline facade for inference."""
 
-    def __init__(self, model: DiTModel, evaluation_config: EvaluationConfig, device: str = "cuda"):
+    def __init__(self, model: DiTModel, evaluation_config: EvaluationConfig, device: str = None):
         self.model = model
         self.evaluation_config = evaluation_config
         config = parse_config()
@@ -75,7 +76,7 @@ class MagiPipeline:
         else:
             save_path = f"{save_path_prefix}_{seconds}s_{br_width}x{br_height}.mp4"
 
-        with torch.random.fork_rng(devices=[torch.cuda.current_device()]):
+        with torch.random.fork_rng(devices=fork_rng_devices()):
             torch.random.manual_seed(seed)
             video_np, audio_np = self.evaluator.evaluate(
                 prompt,
@@ -98,7 +99,7 @@ class MagiPipeline:
             audio_path = saving_name + str(random.randint(0, 1000000)) + ".wav"
             video_path = saving_name + str(random.randint(0, 1000000)) + ".mp4"
             sf.write(audio_path, audio_np, self.evaluator.audio_vae.sample_rate)
-            imageio.mimwrite(video_path, video_np, fps=self.evaluation_config.fps, quality=8, output_params=["-loglevel", "error"])
+            imageio.mimwrite(video_path, video_np, fps=self.evaluation_config.fps, codec="h264")
             assert os.path.exists(video_path)
             merge_video_and_audio(video_path, audio_path, save_path)
 

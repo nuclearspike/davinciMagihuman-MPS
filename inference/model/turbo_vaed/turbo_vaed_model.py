@@ -4,7 +4,10 @@ import torch
 from .turbo_vaed_module import TurboVAED
 
 
-def get_turbo_vaed(config_path, ckpt_path, device="cuda", weight_dtype=torch.float32) -> TurboVAED:
+def get_turbo_vaed(config_path, ckpt_path, device=None, weight_dtype=torch.float32) -> TurboVAED:
+    if device is None:
+        from inference.utils.device import get_device_string
+        device = get_device_string()
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
     student = TurboVAED.from_config(config)

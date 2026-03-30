@@ -20,6 +20,7 @@ from typing import Optional
 import numpy as np
 import torch
 import whisper
+from inference.utils.device import get_device
 from einops import rearrange
 from PIL import Image
 from scipy.signal import resample
@@ -179,7 +180,7 @@ def load_audio_and_encode(audio_vae: any, audio_path: str, seconds: Optional[int
     window_size = int(audio_chunk_duration * sample_rate)
     step_size = int(window_size * (1 - overlap_ratio))
     if total_samples <= window_size:
-        audio = torch.from_numpy(audio_full).cuda()
+        audio = torch.from_numpy(audio_full).to(get_device())
         audio = audio.unsqueeze(0).expand(2, -1)
         return audio_vae.vae_model.encode(audio)
 
@@ -188,7 +189,7 @@ def load_audio_and_encode(audio_vae: any, audio_path: str, seconds: Optional[int
     for offset_start in range(0, total_samples, step_size):
         offset_end = min(offset_start + window_size, total_samples)
         chunk = whisper.pad_or_trim(audio_full[offset_start:offset_end], length=window_size)
-        chunk_tensor = torch.from_numpy(chunk).cuda().unsqueeze(0).expand(2, -1)
+        chunk_tensor = torch.from_numpy(chunk).to(get_device()).unsqueeze(0).expand(2, -1)
         encoded_chunk = audio_vae.vae_model.encode(chunk_tensor)
 
         if latent_to_audio_ratio is None:

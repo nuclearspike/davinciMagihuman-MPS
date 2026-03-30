@@ -18,6 +18,7 @@ import torch
 from inference.infra.checkpoint import load_model_checkpoint
 from inference.infra.distributed import get_cp_rank, get_pp_rank, get_tp_rank
 from inference.utils import print_mem_info_rank_0, print_model_size, print_rank_0
+from inference.utils.device import get_device, empty_cache
 
 from .dit_module import DiTModel
 
@@ -33,10 +34,10 @@ def get_dit(model_config, engine_config):
     )
 
     model = load_model_checkpoint(model, engine_config)
-    model.cuda(torch.cuda.current_device())
+    model.to(get_device())
     model.eval()
     print_mem_info_rank_0("Load model successfully")
 
     gc.collect()
-    torch.cuda.empty_cache()
+    empty_cache()
     return model

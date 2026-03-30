@@ -30,6 +30,7 @@ from tqdm import tqdm
 
 from inference.common import CPUOffloadWrapper, EvaluationConfig, get_arch_memory
 from inference.infra.distributed import get_cp_group
+from inference.utils.device import get_device_string, empty_cache as device_empty_cache
 from inference.model.dit import DiTModel
 from inference.model.sa_audio import SAAudioFeatureExtractor
 from inference.model.turbo_vaed import TurboVAED, get_turbo_vaed
@@ -165,10 +166,10 @@ class MagiEvaluator:
         model: DiTModel,
         sr_model: Optional[DiTModel],
         config: EvaluationConfig,
-        device: str = "cuda",
+        device: str = None,
         weight_dtype: torch.dtype = torch.bfloat16,
     ):
-        device = f"cuda:{torch.cuda.current_device()}"
+        device = get_device_string()
 
         self.model = model
         self.model.eval()
@@ -474,6 +475,8 @@ class MagiEvaluator:
             )
 
         print_rank_0(f"latent_video: {latent_video.shape}, latent_audio: {latent_audio.shape}")
+        print_rank_0(f"[DIAG] latent_video stats: mean={latent_video.float().mean():.4f}, std={latent_video.float().std():.4f}, min={latent_video.float().min():.4f}, max={latent_video.float().max():.4f}")
+        print_rank_0(f"[DIAG] latent_audio stats: mean={latent_audio.float().mean():.4f}, std={latent_audio.float().std():.4f}, min={latent_audio.float().min():.4f}, max={latent_audio.float().max():.4f}")
         if latent_image is not None:
             latent_video[:, :, :1] = latent_image[:, :, :1]
         return latent_video, latent_audio
@@ -501,10 +504,10 @@ class MagiEvaluator:
         return videos
 
     def post_process(self, latent_video: torch.Tensor, latent_audio: torch.Tensor):
-        torch.cuda.empty_cache()
+        device_empty_cache()
         # CTHW -> THWC
         videos_np = self.decode_video(latent_video, group=get_cp_group())
-        torch.cuda.empty_cache()
+        device_empty_cache()
         event_path_timer().synced_record("Step7: Decode Audio", print_fn=print_rank_last)
 
         if torch.distributed.get_rank() == torch.distributed.get_world_size() - 1:

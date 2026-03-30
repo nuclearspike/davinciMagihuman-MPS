@@ -15,6 +15,7 @@
 from typing import Any, Callable, Dict, Tuple
 
 import torch
+from inference.utils.device import get_device, synchronize as device_synchronize
 
 
 class CPUOffloadWrapper:
@@ -24,15 +25,15 @@ class CPUOffloadWrapper:
         object.__setattr__(self, "is_running_on_gpu", is_running_on_gpu)
 
         cpu_device = torch.device("cpu")
-        cuda_device = torch.device("cuda")
+        gpu_device = get_device()
         object.__setattr__(self, "cpu_device", cpu_device)
-        object.__setattr__(self, "cuda_device", cuda_device)
+        object.__setattr__(self, "cuda_device", gpu_device)
 
         # Initialize placement location
         if is_cpu_offload:
             self.model.to(cpu_device)
         else:
-            self.model.to(cuda_device)
+            self.model.to(gpu_device)
 
         # Whitelist non-compute methods that shouldn't trigger device hops (pass-through only; no device switch)
         object.__setattr__(
@@ -139,8 +140,7 @@ class CPUOffloadWrapper:
             try:
                 return func(*args, **kwargs)
             finally:
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                device_synchronize()
                 self._restore_cpu_state(backups)
         else:
             # Make sure model and args are on the same device

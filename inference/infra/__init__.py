@@ -17,10 +17,12 @@ import torch
 from inference.common import parse_config
 from inference.infra.distributed import get_dp_rank, initialize_distributed
 from inference.utils import print_rank_0, set_random_seed
+from inference.utils.device import is_gpu_available
 
 
 def initialize_infra():
-    assert torch.cuda.is_available(), "Infra requires CUDA environment."
+    if not is_gpu_available():
+        print_rank_0("Warning: No GPU (CUDA/MPS) available, running on CPU.")
 
     # Initialize distributed environment
     initialize_distributed()
